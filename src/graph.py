@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.state import StateGraph
+from src.state import AgentState
 
 
 """
@@ -27,9 +28,44 @@ builder = StateGraph(name="audit_graph")
 # - DocAnalyst: PDF report and documentation
 # - VisionInspector: diagrams and images within the report
 
-builder.add_edge("start", "RepoInvestigator", parallel=True)
-builder.add_edge("start", "DocAnalyst", parallel=True)
-builder.add_edge("start", "VisionInspector", parallel=True)
+def repo_condition_router(state: AgentState) -> str:
+    if state.repo_error:
+        return "error"
+    return "success"
+def doc_condition_router(state: AgentState) -> str:
+    if state.doc_error:
+        return "error"
+    return "success"
+def vision_condition_router(state: AgentState) -> str:
+    if state.vision_error:
+        return "error"
+    return "success"
+
+
+builder.add_conditional_edges(
+    "RepoInvestigator",
+    repo_condition_router,
+    {
+        "success": "EvidenceAggregator",
+        "error": "ErrorHandler"
+    }
+)
+builder.add_conditional_edges(
+    "DocAnalyst",
+    doc_condition_router,
+    {
+        "success": "EvidenceAggregator",
+        "error": "ErrorHandler"
+    }
+)
+builder.add_conditional_edges(
+    "VisionInspector",
+    vision_condition_router,
+    {
+        "success": "EvidenceAggregator",
+        "error": "ErrorHandler"
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -55,12 +91,12 @@ builder.add_edge("VisionInspector", "EvidenceAggregator")
 #   produces the final audit report.
 #
 # Example (to be implemented later):
-# builder.add_edge("EvidenceAggregator", "ProsecutorJudge", parallel=True)
-# builder.add_edge("EvidenceAggregator", "DefenseJudge", parallel=True)
-# builder.add_edge("EvidenceAggregator", "TechLeadJudge", parallel=True)
-# builder.add_edge("ProsecutorJudge", "ChiefJustice")
-# builder.add_edge("DefenseJudge", "ChiefJustice")
-# builder.add_edge("TechLeadJudge", "ChiefJustice")
+builder.add_edge("EvidenceAggregator", "Prosecutor", parallel=True)
+builder.add_edge("EvidenceAggregator", "Defense", parallel=True)
+builder.add_edge("EvidenceAggregator", "TechLead", parallel=True)
+builder.add_edge("Prosecutor", "ChiefJustice")
+builder.add_edge("Defense", "ChiefJustice")
+builder.add_edge("TechLead", "ChiefJustice")
 
 
 # Explicitly set the start and end nodes for the graph.
