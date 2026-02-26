@@ -5,6 +5,15 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 
+# Re-export LangGraph builder for graph wiring.
+from langgraph.graph import StateGraph as _StateGraph
+
+
+def StateGraph(name: str = "audit_graph"):
+    """Create a StateGraph configured for Automation Auditor with AgentState schema."""
+    return _StateGraph(AgentState)
+
+
 # --- Detective Output ---
 
 
@@ -26,11 +35,16 @@ class Evidence(BaseModel):
 
 
 class JudicialOpinion(BaseModel):
+    """Structured output from judge nodes: score, argument, and cited evidence."""
+
     judge: Literal["Prosecutor", "Defense", "TechLead"]
-    criterion_id: str
-    score: int = Field(ge=1, le=5)
-    argument: str
-    cited_evidence: List[str]
+    criterion_id: str = Field(default="default")
+    score: int = Field(ge=1, le=5, description="1-5 scale")
+    argument: str = Field(description="Judge's argument for the score")
+    cited_evidence: List[str] = Field(
+        default_factory=list,
+        description="Cited evidence IDs or locations",
+    )
 
 
 # --- Chief Justice Output ---
@@ -62,16 +76,33 @@ class AuditReport(BaseModel):
 # --- Graph State ---
 
 
-class AgentState(TypedDict):
+class _AgentStateRequired(TypedDict):
+    """Required state keys for graph input."""
+
     repo_url: str
     pdf_path: str
     rubric_dimensions: List[Dict]
+
+
+class _AgentStateOptional(TypedDict, total=False):
+    """Optional state keys (reducers + error flags for conditional routing)."""
+
     evidences: Annotated[
         Dict[str, List[Evidence]],
-        operator.ior
+        operator.ior,
     ]
     opinions: Annotated[
         List[JudicialOpinion],
-        operator.add
+        operator.add,
     ]
     final_report: Optional[AuditReport]
+    report_md: Optional[str]
+    repo_error: bool
+    doc_error: bool
+    vision_error: bool
+    judge_parse_error: Optional[str]
+    needs_reeval: bool
+
+
+class AgentState(_AgentStateRequired, _AgentStateOptional):
+    """Graph state with reducers for parallel execution (prevent overwrites)."""
