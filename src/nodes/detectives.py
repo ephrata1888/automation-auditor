@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.state import Evidence
 from src.tools.doc_tools import extract_path_like_strings, find_keyword_chunks, ingest_pdf
@@ -867,4 +867,104 @@ class VisionInspector:
             )
 
         return evidences
+
+
+# ---------------------------------------------------------------------------
+# Graph node wrappers (StateGraph detectives)
+# ---------------------------------------------------------------------------
+
+
+def repo_investigator_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    RepoInvestigator node: inspects repository and graph structure.
+    Returns evidences keyed by "RepoInvestigator"; sets repo_error on failure.
+    """
+    repo_url = state.get("repo_url") or "."
+    inv = RepoInvestigator()
+    evidences: List[Evidence] = []
+    try:
+        evidences.extend(inv.extract_git_history(repo_url))
+        if Path(repo_url).exists():
+            evidences.extend(inv.analyze_graph_structure(repo_url))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("RepoInvestigator failed")
+        evidences.append(
+            Evidence(
+                goal="RepoInvestigator execution",
+                found=False,
+                content=str(exc),
+                location=repo_url,
+                rationale="Detective raised an exception.",
+                confidence=0.1,
+            )
+        )
+        return {"evidences": {"RepoInvestigator": evidences}, "repo_error": True}
+    return {"evidences": {"RepoInvestigator": evidences}}
+
+
+def doc_analyst_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    DocAnalyst node: analyzes PDF report and documentation.
+    Returns evidences keyed by "DocAnalyst"; sets doc_error on failure.
+    """
+    pdf_path = state.get("pdf_path", "")
+    repo_url = state.get("repo_url") or "."
+    analyst = DocAnalyst()
+    evidences: List[Evidence] = []
+    try:
+        evidences.extend(analyst.verify_theoretical_depth(pdf_path))
+        evidences.extend(analyst.analyze_host_references(repo_url, pdf_path))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("DocAnalyst failed")
+        evidences.append(
+            Evidence(
+                goal="DocAnalyst execution",
+                found=False,
+                content=str(exc),
+                location=pdf_path,
+                rationale="Detective raised an exception.",
+                confidence=0.1,
+            )
+        )
+        return {"evidences": {"DocAnalyst": evidences}, "doc_error": True}
+    return {"evidences": {"DocAnalyst": evidences}}
+
+
+def vision_inspector_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    VisionInspector node: inspects diagrams in PDF report.
+    Returns evidences keyed by "VisionInspector"; sets vision_error on failure.
+    """
+    pdf_path = state.get("pdf_path", "")
+    inspector = VisionInspector()
+    evidences: List[Evidence] = []
+    try:
+        evidences.extend(inspector.inspect_pdf_diagrams(pdf_path))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("VisionInspector failed")
+        evidences.append(
+            Evidence(
+                goal="VisionInspector execution",
+                found=False,
+                content=str(exc),
+                location=pdf_path,
+                rationale="Detective raised an exception.",
+                confidence=0.1,
+            )
+        )
+        return {"evidences": {"VisionInspector": evidences}, "vision_error": True}
+    return {"evidences": {"VisionInspector": evidences}}
+
+
+def error_handler_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    ErrorHandler node: logs errors and continues (no-op state update).
+    """
+    logger.warning(
+        "ErrorHandler invoked: repo_error=%s, doc_error=%s, vision_error=%s",
+        state.get("repo_error"),
+        state.get("doc_error"),
+        state.get("vision_error"),
+    )
+    return {}
 
