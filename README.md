@@ -6,25 +6,26 @@ A modular, multi-agent architecture for auditing software repositories and accom
 
 ## Architecture Overview
 
-The system is built around a partial StateGraph architecture with explicit fan-out and fan-in synchronization points.
+The system is built around a LangGraph `StateGraph` architecture with explicit fan-out and fan-in synchronization points and a deterministic judicial synthesis layer.
 
-### Implemented Components
+### Components
 
 - **Detectives (Parallel Fan-Out)**
-  - `RepoInvestigator` – Repository structure, git history, and sandboxed cloning analysis.
-  - `DocAnalyst` – PDF ingestion and chunked querying (RAG-lite approach).
-  - `VisionInspector` – Diagram extraction and multimodal inspection (stubbed vision integration).
+  - `RepoInvestigator` – Repository structure, git history, safe sandboxed cloning, and AST-based graph/state inspection.
+  - `DocAnalyst` – PDF ingestion and chunked querying (RAG-lite) for theoretical depth and host path accuracy.
+  - `VisionInspector` – Diagram extraction and multimodal inspection (vision model stub + rubric-aligned flow checks).
 - **EvidenceAggregator (Fan-In)**
-  - Collects and merges structured `Evidence` objects using typed reducers.
-
-### Planned Components
-
+  - Collects and merges structured `Evidence` objects using typed reducers on `AgentState`.
 - **Judges (Parallel Fan-Out)**
-  - `Prosecutor`, `Defense`, `TechLead`
-  - Structured output via `JudicialOpinion` schema.
+  - `Prosecutor`, `Defense`, `TechLead` – persona-specific LLM evaluators that emit `JudicialOpinion` objects
+    (score, argument, cited_evidence) over the same shared `Evidence`.
 - **ChiefJustice (Final Fan-In + Deterministic Synthesis)**
-  - Applies rule-based overrides (Security Override, Fact Supremacy, Functionality Weight).
-  - Produces final Markdown audit report.
+  - Applies hardcoded, rule-based overrides aligned with the Automation Auditor Input Rubric:
+    - **Rule of Security** – confirmed security flaws cap the score at 3.
+    - **Rule of Evidence (Fact Supremacy)** – Detective evidence overrules hallucinated Defense claims.
+    - **Rule of Functionality** – TechLead’s modular-architecture confirmation carries highest weight for architecture criteria.
+    - **Statutes** – Orchestration Fraud, Technical Debt, and Structured-Output / Hallucination Liability caps.
+  - Produces a final `AuditReport` and a Markdown audit file (`audit_report.md`) with Executive Summary, Criterion Breakdown, and Remediation Plan.
 
 ---
 
@@ -45,7 +46,7 @@ src/
 ```
 
 - `state.py` – Typed AgentState and reducers for parallel execution.
-- `graph.py` – Partial StateGraph wiring with Detective fan-out and EvidenceAggregator fan-in.
+- `graph.py` – Full StateGraph wiring with Detective fan-out/fan-in and Judge fan-out/fan-in into ChiefJustice.
 - `repo_tools.py` – Sandboxed git cloning and log extraction.
 - `doc_tools.py` – PDF parsing and chunked querying.
 - `vision_tools.py` – Image extraction and multimodal model stub.
@@ -107,9 +108,9 @@ What happens internally:
 
 1. Repository is cloned in a sandboxed temporary directory.
 2. Detectives execute in parallel.
-3. Evidence is aggregated using typed reducers.
-4. (Planned) Judges evaluate structured evidence.
-5. (Planned) ChiefJustice synthesizes final report.
+3. Evidence is aggregated using typed reducers on `AgentState`.
+4. Judges evaluate the same structured evidence in parallel, emitting `JudicialOpinion` objects.
+5. ChiefJustice applies deterministic rubric rules and writes `audit_report.md` plus a structured `AuditReport`.
 
 ---
 
@@ -128,10 +129,10 @@ python -m src.main \
 
 The architecture implements:
 
-- Detective fan-out (parallel execution)
+- Detective fan-out (parallel execution from `START`)
 - EvidenceAggregator fan-in (state merge)
-- Planned judicial fan-out
-- Planned deterministic synthesis fan-in
+- Judge fan-out (parallel `Prosecutor`, `Defense`, `TechLead` from `EvidenceAggregator`)
+- ChiefJustice fan-in and deterministic synthesis (final markdown + `AuditReport`)
 
 See the PDF report for the full diagram (Figure 1).
 
