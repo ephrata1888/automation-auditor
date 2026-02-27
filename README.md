@@ -11,9 +11,9 @@ The system is built around a LangGraph `StateGraph` architecture with explicit f
 ### Components
 
 - **Detectives (Parallel Fan-Out)**
-  - `RepoInvestigator` – Repository structure, git history, safe sandboxed cloning, and AST-based graph/state inspection.
-  - `DocAnalyst` – PDF ingestion and chunked querying (RAG-lite) for theoretical depth and host path accuracy.
-  - `VisionInspector` – Diagram extraction and multimodal inspection (vision model stub + rubric-aligned flow checks).
+  - `RepoInvestigator` – Repository structure, git history, safe sandboxed cloning, and AST-based graph/state inspection. Optionally uses an LLM (OpenAI) to summarize git history for orchestration assessment.
+  - `DocAnalyst` – PDF ingestion and chunked querying (RAG-lite) for theoretical depth and host path accuracy. Optionally uses an LLM (OpenAI) to assess concept depth in the report.
+  - `VisionInspector` – Diagram extraction and multimodal inspection (Google Gemini free-tier vision when `GEMINI_API_KEY` is set; otherwise stub).
 - **EvidenceAggregator (Fan-In)**
   - Collects and merges structured `Evidence` objects using typed reducers on `AgentState`.
 - **Judges (Parallel Fan-Out)**
@@ -49,7 +49,7 @@ src/
 - `graph.py` – Full StateGraph wiring with Detective fan-out/fan-in and Judge fan-out/fan-in into ChiefJustice.
 - `repo_tools.py` – Sandboxed git cloning and log extraction.
 - `doc_tools.py` – PDF parsing and chunked querying.
-- `vision_tools.py` – Image extraction and multimodal model stub.
+- `vision_tools.py` – Image extraction from PDFs and vision model integration (Google Gemini free tier).
 
 ---
 
@@ -89,7 +89,7 @@ cp .env.example .env
 
 ```
 
-Fill in any required API keys (for future multimodal model integration).
+Fill in any required API keys. Optional: set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) for VisionInspector diagram analysis using Google Gemini’s free tier. RepoInvestigator and DocAnalyst optionally use **OpenAI** (e.g. `OPENAI_API_KEY`) for LLM summaries and concept-depth assessment; Judges use OpenAI for evaluations. See `.env.example`.
 
 ---
 
@@ -163,10 +163,10 @@ pip install -r requirements.txt
 
 ## Current Status
 
-- Detective layer: Implemented
+- Detective layer: Implemented (RepoInvestigator and DocAnalyst optionally use OpenAI; VisionInspector uses Gemini when `GEMINI_API_KEY` is set).
 - Evidence aggregation: Implemented
-- Vision integration: Stubbed (ready for multimodal API)
-- Judicial layer: Planned
+- Vision integration: Optional Google Gemini (free tier); set `GEMINI_API_KEY` in `.env`. Falls back to stub if unset.
+- Judicial layer: Planned (Judges use OpenAI).
 - ChiefJustice synthesis engine: Planned
 
 ---
