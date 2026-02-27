@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import List
@@ -80,23 +81,57 @@ def extract_images_from_pdf(path: str) -> List[Path]:
 def _call_vision_model(image_path: Path, prompt: str) -> str:
     """Call a multimodal vision model on the given image.
 
-    This is a stub suitable for later integration with Gemini Pro Vision,
-    GPT-4o, or another multimodal API. To plug in a real model, replace the
-    body of this function with a call out to your chosen client library.
+    Uses Google Gemini (free tier) when GEMINI_API_KEY or GOOGLE_API_KEY is set.
+    Otherwise returns a stub message so the pipeline still produces evidence.
     """
-    logger.debug("Vision model stub called for image: %s", image_path)
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key or not api_key.strip():
+        logger.debug(
+            "No GEMINI_API_KEY or GOOGLE_API_KEY set; using vision stub for %s",
+            image_path,
+        )
+        return (
+            "Vision model stub: no real analysis performed. "
+            "Set GEMINI_API_KEY (or GOOGLE_API_KEY) in the environment to use "
+            "Google Gemini free vision for diagram inspection."
+        )
 
-    # Example integration sketch (to be implemented by the consumer):
-    # from some_client import VisionClient
-    # client = VisionClient(...)
-    # response = client.analyze_image(image_path=image_path, prompt=prompt)
-    # return response.text
+    try:
+        from google import genai  # type: ignore[import-untyped]
+        from google.genai import types  # type: ignore[import-untyped]
+    except ImportError as exc:
+        logger.warning(
+            "google-genai not available for vision: %s. Using stub.",
+            exc,
+        )
+        return (
+            "Vision model stub: google-genai not installed. "
+            "Install with: uv add google-genai Pillow"
+        )
 
-    return (
-        "Vision model stub: no real analysis performed. "
-        "Integrate a multimodal model (e.g., Gemini Pro Vision or GPT-4o) "
-        "here to inspect diagram type and flow."
-    )
+    try:
+        client = genai.Client(api_key=api_key.strip())
+        uploaded = client.files.upload(file=str(image_path))
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[prompt, uploaded],
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=1024,
+            ),
+        )
+        if response.text:
+            return response.text.strip()
+        return (
+            "Vision model returned no text (possibly safety filter). "
+            "Diagram could not be classified."
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Gemini vision call failed for %s: %s", image_path, exc)
+        return (
+            "Vision model stub: Gemini API call failed. "
+            "Check your API key and network. Diagram was not analyzed."
+        )
 
 
 def analyze_flow(image_path: Path) -> str:

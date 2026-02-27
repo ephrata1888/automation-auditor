@@ -29,6 +29,68 @@ class RepoInvestigator:
     2. Analyze the Automation Auditor graph wiring using the Python AST.
     """
 
+    def _summarize_commit_history_llm(self, commit_log: str) -> Optional[Evidence]:
+        """
+        Use an LLM to semantically summarize git history for orchestration assessment.
+
+        Returns an Evidence object on success, or None if the LLM is unavailable
+        or the call fails. Deterministic fallbacks (existing Evidence) remain primary.
+        """
+        if not commit_log.strip():
+            return None
+
+        try:
+            import openai  # type: ignore[import]
+        except Exception as exc:  # pragma: no cover - import environment specific
+            logger.warning("LLM client unavailable for git history summary: %s", exc)
+            return None
+
+        system_prompt = (
+            "You are assisting an Automation Auditor that evaluates repository "
+            "architecture and development process.\n\n"
+            "Given a chronological git log (oldest first) in the format "
+            "'<hash> <timestamp> <message>', produce a concise summary focused on:\n"
+            "- Whether commits show progression: environment setup -> tooling -> graph orchestration.\n"
+            "- Any signs of bulk upload / single-shot commit patterns.\n"
+            "- How well the history supports a parallel StateGraph architecture."
+        )
+
+        user_prompt = (
+            "Git log (oldest to newest):\n\n"
+            f"{commit_log}\n\n"
+            "Respond with 2–4 sentences. Be factual and avoid speculation."
+        )
+
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            content = response.choices[0].message["content"]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LLM git history summary failed: %s", exc)
+            return None
+
+        summary = str(content).strip()
+        if not summary:
+            return None
+
+        return Evidence(
+            goal="LLM summary: git history for orchestration",
+            found=True,
+            content=summary,
+            location="git log --oneline",
+            rationale=(
+                "LLM-provided semantic summary of commit progression and its "
+                "relevance to graph orchestration quality."
+            ),
+            confidence=0.7,
+        )
+
     def extract_git_history(self, path: str) -> List[Evidence]:
         """Clone a git repository and extract its commit history.
 
@@ -119,6 +181,11 @@ class RepoInvestigator:
                 confidence=confidence,
             )
         )
+
+        # Optional LLM semantic summary (does not affect primary Evidence)
+        llm_evidence = self._summarize_commit_history_llm(commit_log)
+        if llm_evidence is not None:
+            evidences.append(llm_evidence)
 
         return evidences
 
@@ -608,6 +675,81 @@ class DocAnalyst:
 
         return evidences
 
+    def _llm_assess_concept_depth(
+        self,
+        pdf_path: str,
+        keyword: str,
+        explanatory_chunks: List[str],
+    ) -> Optional[Evidence]:
+        """
+        Use an LLM to semantically assess whether the PDF's explanation of a
+        theoretical concept is deep and aligned with rubric expectations.
+
+        Returns an Evidence object on success, or None on failure.
+        """
+        if not explanatory_chunks:
+            return None
+
+        try:
+            import openai  # type: ignore[import]
+        except Exception as exc:  # pragma: no cover - import environment specific
+            logger.warning("LLM client unavailable for concept depth check: %s", exc)
+            return None
+
+        joined_chunks = "\n\n".join(explanatory_chunks[:3])
+
+        system_prompt = (
+            "You are assisting an Automation Auditor evaluating a PDF report. "
+            "You must assess whether a theoretical concept is explained with "
+            "sufficient depth and architectural specificity.\n\n"
+            "Consider:\n"
+            "- Does the text describe HOW the concept is implemented, not just name it?\n"
+            "- Is the explanation tied to concrete architectural elements (e.g., "
+            "StateGraph nodes, fan-in/fan-out edges, judges, or state management)?\n"
+            "Respond with a short verdict and justification."
+        )
+
+        user_prompt = (
+            f"Concept keyword: {keyword}\n\n"
+            "Relevant excerpts from the PDF:\n\n"
+            f"{joined_chunks}\n\n"
+            "Answer in 2–3 sentences. Start your answer with either "
+            "'DEPTH: STRONG' or 'DEPTH: WEAK', then explain why."
+        )
+
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            content = response.choices[0].message["content"]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LLM concept depth assessment failed for %s: %s", keyword, exc)
+            return None
+
+        verdict = str(content).strip()
+        if not verdict:
+            return None
+
+        is_strong = verdict.upper().startswith("DEPTH: STRONG")
+        confidence = 0.8 if is_strong else 0.7
+
+        return Evidence(
+            goal=f"LLM assessment: concept depth for {keyword}",
+            found=is_strong,
+            content=verdict,
+            location=pdf_path,
+            rationale=(
+                "LLM semantic assessment of how deeply the PDF explains the "
+                f"concept '{keyword}' in terms of concrete architecture."
+            ),
+            confidence=confidence,
+        )
+
     def verify_concepts(self, pdf_path: str, keywords: List[str]) -> List[Evidence]:
         """Assess whether key concepts are meaningfully explained in a PDF.
 
@@ -686,6 +828,15 @@ class DocAnalyst:
                         confidence=0.9,
                     )
                 )
+
+                # Optional LLM semantic depth check (non-breaking enhancement)
+                llm_ev = self._llm_assess_concept_depth(
+                    pdf_path=pdf_path,
+                    keyword=keyword,
+                    explanatory_chunks=explanatory_chunks,
+                )
+                if llm_ev is not None:
+                    evidences.append(llm_ev)
             else:
                 evidences.append(
                     Evidence(
