@@ -67,6 +67,7 @@ def main() -> None:
     pdf_path = args.report.strip()
 
     rubric_dimensions = _load_rubric_dimensions()
+    logger.info("Loaded %d rubric dimensions from rubric.json", len(rubric_dimensions))
 
     from src.graph import audit_graph
 
@@ -81,7 +82,9 @@ def main() -> None:
     result = graph.invoke(initial_state)
 
     report_path = result.get("report_path") or "audit_report.md"
-    logger.info("Audit complete. Report written to %s", report_path)
+    final_report = result.get("final_report") or result.get("final_verdict")
+    n_criteria = len(final_report.criteria) if final_report and hasattr(final_report, "criteria") else 0
+    logger.info("Audit complete. Report written to %s (%d criteria synthesized)", report_path, n_criteria)
 
 
 if __name__ == "__main__":

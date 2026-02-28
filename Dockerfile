@@ -16,12 +16,15 @@ COPY rubric.json ./
 RUN pip install uv \
     && uv sync --no-dev --no-editable
 
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
 ENV PYTHONPATH=/app
 
 # Write audit_report.md here; mount a volume to retrieve it.
 WORKDIR /workspace
 
-# Pass OPENAI_API_KEY (and optionally GEMINI_API_KEY) at run time.
+# Pass GROQ_API_KEY (required) and optionally GEMINI_API_KEY at run time.
 # Override repo/report via env REPO_URL, PDF_PATH or by passing args after the image.
 ENTRYPOINT ["python", "-m", "src.main"]
 CMD ["--repo", ".", "--report", ""]

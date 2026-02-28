@@ -15,10 +15,13 @@ Produces a structured Markdown report:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.state import AuditReport, CriterionResult, Evidence, JudicialOpinion
+
+logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - environment specific
     from langsmith import traceable  # type: ignore[import]
@@ -599,21 +602,28 @@ def _build_report_md(
 @traceable(name="ChiefJustice")  # ensures a distinct trace entry per graph node
 def chief_justice_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    ChiefJustice node: collects all JudicialOpinion objects, applies deterministic
-    rules, and produces a structured Markdown report plus AuditReport.
+    ChiefJustice node: collects all JudicialOpinion objects, iterates over
+    rubric_dimensions, and produces one CriterionResult per dimension.
     """
     opinions: List[JudicialOpinion] = list(state.get("opinions") or [])
     evidences: Dict[str, List[Evidence]] = state.get("evidences") or {}
+    rubric_dimensions: List[Dict[str, Any]] = list(state.get("rubric_dimensions") or [])
     repo_url = state.get("repo_url", "unknown")
 
-    # Group opinions by criterion_id (for multi-criterion audits)
+    logger.info(
+        "ChiefJustice: %d judicial opinions produced, %d rubric dimensions to synthesize",
+        len(opinions),
+        len(rubric_dimensions),
+    )
+
+    # Group opinions by criterion_id (dimension id)
     by_criterion: Dict[str, List[JudicialOpinion]] = {}
     for op in opinions:
         cid = op.criterion_id or "default"
         by_criterion.setdefault(cid, []).append(op)
 
-    # If no opinions, produce minimal report
-    if not by_criterion:
+    # If no rubric dimensions, produce minimal report (backwards compat)
+    if not rubric_dimensions:
         executive_summary = (
             "No JudicialOpinion objects were collected from Prosecutor, Defense, "
             "or TechLead. Evidence aggregation or judge execution may have failed."
@@ -640,13 +650,22 @@ def chief_justice_node(state: Dict[str, Any]) -> Dict[str, Any]:
     all_scores: List[float] = []
     any_reeval = False
 
-    for criterion_id, ops in by_criterion.items():
-        score, dissent, needs_reeval = _compute_final_score(ops, evidences, criterion_id)
+    # Iterate over rubric_dimensions (not by_criterion) to ensure one section per dimension.
+    for dimension in rubric_dimensions:
+        criterion_id = dimension.get("id", "default")
+        dimension_name = dimension.get("name", criterion_id.replace("_", " ").title())
+        ops = by_criterion.get(criterion_id, [])
+
+        # If no opinions for this dimension, use fallback score 3.
+        if not ops:
+            score, dissent, needs_reeval = 3, None, False
+        else:
+            score, dissent, needs_reeval = _compute_final_score(ops, evidences, criterion_id)
+
         any_reeval = any_reeval or needs_reeval
         all_scores.append(float(score))
-        # Build a concrete, file-aware remediation suggestion.
-        # Start from any file-like handles mentioned in cited_evidence, then
-        # enrich with matching Evidence.location paths.
+
+        # Build remediation: use cited_evidence from opinions when available.
         referenced_locations: List[str] = []
         cited_handles: List[str] = []
         for op in ops:
@@ -654,7 +673,6 @@ def chief_justice_node(state: Dict[str, Any]) -> Dict[str, Any]:
         cited_handles = [h for h in cited_handles if h]
         referenced_locations.extend(cited_handles)
 
-        # Map cited handles to underlying Evidence.location fields wherever possible.
         for handle in cited_handles:
             handle_lower = handle.lower()
             for source_items in evidences.values():
@@ -680,7 +698,6 @@ def chief_justice_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "classes, and ensure that state updates flow through well-defined reducers."
             )
 
-        # Generic remediation when score is low but not clearly categorized.
         if not remediation_parts:
             remediation_parts.append(
                 "Tighten implementation and tests for this criterion in the files named in the "
@@ -699,7 +716,7 @@ def chief_justice_node(state: Dict[str, Any]) -> Dict[str, Any]:
         criteria_results.append(
             CriterionResult(
                 dimension_id=criterion_id,
-                dimension_name=criterion_id.replace("_", " ").title(),
+                dimension_name=dimension_name,
                 final_score=score,
                 judge_opinions=ops,
                 dissent_summary=dissent,
@@ -707,10 +724,13 @@ def chief_justice_node(state: Dict[str, Any]) -> Dict[str, Any]:
             )
         )
 
+    logger.info("ChiefJustice: synthesized %d criteria", len(criteria_results))
+
     overall = sum(all_scores) / len(all_scores) if all_scores else 3.0
+    n_criteria = len(criteria_results)
     executive_summary_parts: List[str] = [
         f"Repository: {repo_url}.",
-        f"Overall final score: {overall:.1f}/5 across {len(criteria_results)} criterion/criteria.",
+        f"Overall final score: {overall:.1f}/5 across {n_criteria} criteria.",
     ]
     if any_reeval:
         executive_summary_parts.append(

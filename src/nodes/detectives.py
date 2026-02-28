@@ -51,7 +51,7 @@ class RepoInvestigator:
 
         try:
             from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore[import]
-            from langchain_openai import ChatOpenAI  # type: ignore[import]
+            from src.llm import get_chat_llm
         except Exception as exc:  # pragma: no cover - import environment specific
             logger.warning("LLM client unavailable for git history summary: %s", exc)
             return None
@@ -73,7 +73,7 @@ class RepoInvestigator:
         )
 
         try:
-            llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+            llm = get_chat_llm("RepoInvestigator", temperature=0)
             msg = llm.invoke(
                 [
                     SystemMessage(content=system_prompt),
@@ -702,7 +702,7 @@ class DocAnalyst:
 
         try:
             from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore[import]
-            from langchain_openai import ChatOpenAI  # type: ignore[import]
+            from src.llm import get_chat_llm
         except Exception as exc:  # pragma: no cover - import environment specific
             logger.warning("LLM client unavailable for concept depth check: %s", exc)
             return None
@@ -729,7 +729,7 @@ class DocAnalyst:
         )
 
         try:
-            llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+            llm = get_chat_llm("DocAnalyst", temperature=0)
             msg = llm.invoke(
                 [
                     SystemMessage(content=system_prompt),
