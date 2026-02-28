@@ -125,6 +125,39 @@ python -m src.main \
 
 ---
 
+## Docker
+
+A minimal production image isolates the runtime and keeps the graph entry point (`audit_graph`) and report output (`audit_report.md`) unchanged.
+
+**Build:**
+
+```bash
+docker build -t automation-auditor .
+```
+
+**Run (pass API keys and mount workspace for inputs/output):**
+
+```bash
+docker run --rm \
+  -e OPENAI_API_KEY \
+  -e GEMINI_API_KEY \
+  -e REPO_URL=https://github.com/example/project \
+  -e PDF_PATH=/workspace/report.pdf \
+  -v "$(pwd)":/workspace \
+  automation-auditor
+```
+
+`audit_report.md` is written inside the container at `/workspace/audit_report.md`; with `-v "$(pwd)":/workspace` it appears in your current directory. You can override repo/report via env (`REPO_URL`, `PDF_PATH`) or by passing args:  
+`docker run ... automation-auditor -- --repo https://... --report /workspace/report.pdf`.
+
+**Why Docker strengthens this architecture (for this assignment):**
+
+- **Reproducibility** – The same image runs the same Python version and dependencies everywhere, so audit results are not skewed by local env differences.
+- **Dependency isolation** – System (e.g. git) and Python deps are fixed in the image; no conflicts with the host.
+- **Safety when auditing arbitrary peer repositories** – Cloning and inspection run inside the container; the host filesystem and network are only exposed via explicit mounts and env. The existing sandboxed clone (temp dir + subprocess) is further isolated from the host, reducing risk when auditing unknown or untrusted repos.
+
+---
+
 ## StateGraph Flow
 
 The architecture implements:
