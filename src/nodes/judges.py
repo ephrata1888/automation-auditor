@@ -11,9 +11,31 @@ import json
 import logging
 from typing import Any, Dict, List
 
+from pydantic import BaseModel, Field
+
 from src.state import Evidence, JudicialOpinion
 
 logger = logging.getLogger(__name__)
+
+# Optional LangSmith tracing for node-level observability.
+try:  # pragma: no cover - environment specific
+    from langsmith import traceable  # type: ignore[import]
+except Exception:  # pragma: no cover - environment specific
+    def traceable(*_args: Any, **_kwargs: Any):  # type: ignore[no-redef]
+        def _decorator(func):
+            return func
+
+        return _decorator
+
+
+class _JudgeLLMOutput(BaseModel):
+    """Structured judge output (excluding the fixed judge role)."""
+
+    score: int = Field(default=3, ge=1, le=5)
+    argument: str = Field(default="")
+    cited_evidence: List[str] = Field(default_factory=list)
+    criterion_id: str = Field(default="default")
+
 
 # ---------------------------------------------------------------------------
 # JudicialOpinion parsing and error handling
@@ -82,16 +104,14 @@ def _evaluate_evidence(evidence_summary: str, judge_role: str) -> str | Dict[str
     Uses temperature=0 for deterministic output. On any API or JSON parsing error,
     returns a neutral fallback dict compatible with `_parse_opinion`.
     """
-    # Local import to avoid hard dependency at module import time and to keep
-    # static type checkers from complaining if the SDK is not installed in
-    # lightweight environments.
     try:
-        import openai  # type: ignore[import]
+        from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore[import]
+        from langchain_openai import ChatOpenAI  # type: ignore[import]
     except Exception as exc:  # pragma: no cover - import environment specific
-        logger.warning("openai SDK not available for %s: %s", judge_role, exc)
+        logger.warning("LangChain OpenAI client unavailable for %s: %s", judge_role, exc)
         return {
             "score": 3,
-            "argument": f"[{judge_role}] Neutral fallback opinion due to missing openai SDK.",
+            "argument": f"[{judge_role}] Neutral fallback opinion due to missing LangChain OpenAI client.",
             "cited_evidence": [],
             "criterion_id": "default",
         }
@@ -106,12 +126,11 @@ def _evaluate_evidence(evidence_summary: str, judge_role: str) -> str | Dict[str
     system_prompt = (
         "You are the '{judge_role}' judge in an automated code audit.\n"
         "You receive a summarized set of evidences about a repository and report.\n"
-        "Your task is to return a STRICT JSON object with the following fields:\n"
+        "Your task is to output a structured object with the following fields:\n"
         "  - score: integer from 1 to 5 (no floats)\n"
         "  - argument: string explaining your reasoning for the score\n"
         "  - cited_evidence: list of strings referencing specific evidence items\n"
         "  - criterion_id: MUST be exactly \"default\" (all judges must use this value)\n"
-        "Do not include any text outside the JSON. Do not wrap it in markdown.\n"
     ).format(judge_role=judge_role)
 
     user_prompt = (
@@ -121,36 +140,31 @@ def _evaluate_evidence(evidence_summary: str, judge_role: str) -> str | Dict[str
     ).format(judge_role=judge_role, summary=evidence_summary)
 
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            temperature=0,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+        llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+        # gpt-3.5-turbo does not support OpenAI "json_schema" structured outputs;
+        # use tool/function calling to keep output structured and traceable.
+        structured = llm.with_structured_output(_JudgeLLMOutput, method="function_calling")
+        output = structured.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
             ],
         )
 
-        content = response.choices[0].message["content"]
-        data = json.loads(content)
-
-        # Normalize and enforce required fields for compatibility with _parse_opinion.
-        # Enforce criterion_id="default" so all opinions group together in ChiefJustice.
+        data = output.model_dump() if hasattr(output, "model_dump") else dict(output)
         score = int(data.get("score", 3))
         argument = str(data.get("argument") or "")
         cited_evidence = data.get("cited_evidence") or []
         if not isinstance(cited_evidence, list):
             cited_evidence = [str(cited_evidence)]
-        criterion_id = "default"
 
+        # Enforce criterion_id="default" so all opinions group together in ChiefJustice.
         return {
             "score": score,
             "argument": argument,
             "cited_evidence": [str(c) for c in cited_evidence],
-            "criterion_id": criterion_id,
+            "criterion_id": "default",
         }
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        logger.warning("Failed to parse judge LLM output for %s: %s", judge_role, exc)
-        return fallback
     except Exception as exc:  # API errors and any other unexpected failures
         logger.warning("Judge LLM call failed for %s: %s", judge_role, exc)
         return fallback
@@ -171,6 +185,7 @@ def _build_evidence_summary(evidences: Dict[str, List[Evidence]]) -> str:
     return "\n".join(parts) if parts else "No evidence collected."
 
 
+@traceable(name="Prosecutor")  # ensures a distinct trace entry per judge node
 def prosecutor_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Prosecutor node: adversarial evaluation of evidence.
@@ -192,6 +207,7 @@ def prosecutor_node(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"opinions": [opinion]}
 
 
+@traceable(name="Defense")  # ensures a distinct trace entry per judge node
 def defense_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Defense node: generous evaluation rewarding effort and intent.
@@ -212,6 +228,7 @@ def defense_node(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"opinions": [opinion]}
 
 
+@traceable(name="TechLead")  # ensures a distinct trace entry per judge node
 def tech_lead_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     TechLead node: architectural and maintainability evaluation.

@@ -20,6 +20,16 @@ from src.tools.vision_tools import analyze_flow as vision_analyze_flow, extract_
 
 logger = logging.getLogger(__name__)
 
+# Optional LangSmith tracing for node-level observability.
+try:  # pragma: no cover - environment specific
+    from langsmith import traceable  # type: ignore[import]
+except Exception:  # pragma: no cover - environment specific
+    def traceable(*_args: Any, **_kwargs: Any):  # type: ignore[no-redef]
+        def _decorator(func):
+            return func
+
+        return _decorator
+
 
 class RepoInvestigator:
     """Detective node responsible for inspecting repositories and graph structure.
@@ -40,7 +50,8 @@ class RepoInvestigator:
             return None
 
         try:
-            import openai  # type: ignore[import]
+            from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore[import]
+            from langchain_openai import ChatOpenAI  # type: ignore[import]
         except Exception as exc:  # pragma: no cover - import environment specific
             logger.warning("LLM client unavailable for git history summary: %s", exc)
             return None
@@ -62,15 +73,14 @@ class RepoInvestigator:
         )
 
         try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                temperature=0,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+            llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+            msg = llm.invoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_prompt),
+                ]
             )
-            content = response.choices[0].message["content"]
+            content = getattr(msg, "content", "")
         except Exception as exc:  # noqa: BLE001
             logger.warning("LLM git history summary failed: %s", exc)
             return None
@@ -691,7 +701,8 @@ class DocAnalyst:
             return None
 
         try:
-            import openai  # type: ignore[import]
+            from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore[import]
+            from langchain_openai import ChatOpenAI  # type: ignore[import]
         except Exception as exc:  # pragma: no cover - import environment specific
             logger.warning("LLM client unavailable for concept depth check: %s", exc)
             return None
@@ -718,15 +729,14 @@ class DocAnalyst:
         )
 
         try:
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                temperature=0,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+            llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+            msg = llm.invoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_prompt),
+                ]
             )
-            content = response.choices[0].message["content"]
+            content = getattr(msg, "content", "")
         except Exception as exc:  # noqa: BLE001
             logger.warning("LLM concept depth assessment failed for %s: %s", keyword, exc)
             return None
@@ -1025,6 +1035,7 @@ class VisionInspector:
 # ---------------------------------------------------------------------------
 
 
+@traceable(name="RepoInvestigator")  # ensures a distinct trace entry per graph node
 def repo_investigator_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     RepoInvestigator node: inspects repository and graph structure.
@@ -1053,6 +1064,7 @@ def repo_investigator_node(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"evidences": {"RepoInvestigator": evidences}}
 
 
+@traceable(name="DocAnalyst")  # ensures a distinct trace entry per graph node
 def doc_analyst_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     DocAnalyst node: analyzes PDF report and documentation.
@@ -1081,6 +1093,7 @@ def doc_analyst_node(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"evidences": {"DocAnalyst": evidences}}
 
 
+@traceable(name="VisionInspector")  # ensures a distinct trace entry per graph node
 def vision_inspector_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     VisionInspector node: inspects diagrams in PDF report.
@@ -1107,6 +1120,7 @@ def vision_inspector_node(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"evidences": {"VisionInspector": evidences}}
 
 
+@traceable(name="ErrorHandler")  # ensures a distinct trace entry per graph node
 def error_handler_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     ErrorHandler node: logs errors and continues (no-op state update).

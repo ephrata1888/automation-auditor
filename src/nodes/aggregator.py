@@ -16,7 +16,17 @@ from src.state import Evidence
 
 logger = logging.getLogger(__name__)
 
+try:  # pragma: no cover - environment specific
+    from langsmith import traceable  # type: ignore[import]
+except Exception:  # pragma: no cover - environment specific
+    def traceable(*_args: Any, **_kwargs: Any):  # type: ignore[no-redef]
+        def _decorator(func):
+            return func
 
+        return _decorator
+
+
+@traceable(name="EvidenceAggregator")  # ensures a distinct trace entry per graph node
 def evidence_aggregator_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     EvidenceAggregator node: combines and normalizes collected evidence.

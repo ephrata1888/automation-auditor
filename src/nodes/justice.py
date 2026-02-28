@@ -20,6 +20,15 @@ from typing import Any, Dict, List, Optional
 
 from src.state import AuditReport, CriterionResult, Evidence, JudicialOpinion
 
+try:  # pragma: no cover - environment specific
+    from langsmith import traceable  # type: ignore[import]
+except Exception:  # pragma: no cover - environment specific
+    def traceable(*_args: Any, **_kwargs: Any):  # type: ignore[no-redef]
+        def _decorator(func):
+            return func
+
+        return _decorator
+
 
 # ---------------------------------------------------------------------------
 # Deterministic synthesis rules
@@ -587,6 +596,7 @@ def _build_report_md(
 # ---------------------------------------------------------------------------
 
 
+@traceable(name="ChiefJustice")  # ensures a distinct trace entry per graph node
 def chief_justice_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     ChiefJustice node: collects all JudicialOpinion objects, applies deterministic
