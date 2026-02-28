@@ -1,0 +1,36 @@
+# Dependencies and local env
+.venv
+venv
+.env
+.env.*
+!.env.example
+
+# Git and IDE
+.git
+.gitignore
+.cursor
+.vscode
+*.swp
+*.swo
+
+# Build and cache
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Docs and meta (not needed at runtime)
+README.md
+LICENSE
+*.md
+
+# Tests (not needed in production image)
+tests
+*_test.py
+test_*.py
+
+# Docker
+Dockerfile
+.dockerignore
